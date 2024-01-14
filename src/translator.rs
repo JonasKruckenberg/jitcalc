@@ -1,3 +1,4 @@
+use crate::jit::{ExprDefinitions, ExprId};
 use crate::lexer::{Lexer, Token};
 use alloc::collections::BTreeMap;
 use alloc::vec;
@@ -5,10 +6,9 @@ use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::iter::Peekable;
 use cranelift::frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{
-    types, AbiParam, Function, Inst, InstBuilder, InstructionData, MemFlags, Opcode, Signature,
-    UserExternalName, UserFuncName, Value,
+    types, AbiParam, ExtFuncData, ExternalName, Function, Inst, InstBuilder, InstructionData,
+    Opcode, Signature, UserExternalName, UserFuncName, Value,
 };
 use cranelift_codegen::isa::CallConv;
 
@@ -19,13 +19,15 @@ enum Operator {
     Mul,
     Div,
     LParen,
+    Call(ExprId),
 }
 
 impl Operator {
     fn precedence(&self) -> usize {
         match self {
-            Operator::Add | Operator::Sub => 2,
+            Operator::Call(_) => 4,
             Operator::Mul | Operator::Div => 3,
+            Operator::Add | Operator::Sub => 2,
             Operator::LParen => 0,
         }
     }
@@ -42,15 +44,18 @@ pub struct Translator<'a> {
     value_stack: Vec<Value>,
     op_stack: Vec<Operator>,
     params: BTreeMap<&'a str, Value>,
+
+    expr_defs: &'a ExprDefinitions,
 }
 
 impl<'a> Translator<'a> {
-    pub fn from_tokens(tokens: Lexer<'a>) -> Self {
+    pub fn from_tokens(tokens: Lexer<'a>, expr_defs: &'a ExprDefinitions) -> Self {
         Self {
             tokens: tokens.peekable(),
             value_stack: vec![],
             op_stack: vec![],
             params: Default::default(),
+            expr_defs,
         }
     }
 
@@ -68,12 +73,6 @@ impl<'a> Translator<'a> {
         );
 
         let mut builder = FunctionBuilder::new(&mut func, ctx);
-
-        builder
-            .func
-            .signature
-            .params
-            .push(AbiParam::new(types::I64));
 
         let entry_block = builder.create_block();
         builder.seal_block(entry_block);
@@ -111,32 +110,81 @@ impl<'a> Translator<'a> {
     }
 
     fn process_op(&mut self, builder: &mut FunctionBuilder, op: Operator) {
-        let rhs = self.value_stack.pop().unwrap();
-        let lhs = self.value_stack.pop().unwrap();
+        let val = if let Operator::Call(exprid) = op {
+            let reff = builder
+                .func
+                .declare_imported_user_function(UserExternalName {
+                    namespace: 0,
+                    index: exprid.as_bits(),
+                });
+            let signature =
+                builder.import_signature(self.expr_defs.get_expr_signature(exprid).clone());
 
-        let val = if let (Some((lhs, i1)), Some((rhs, i2))) =
-            (maybe_imm(builder, lhs), maybe_imm(builder, rhs))
-        {
-            builder.func.layout.remove_inst(i1);
-            builder.func.layout.remove_inst(i2);
+            let funcref = builder.import_function(ExtFuncData {
+                name: ExternalName::User(reff),
+                signature,
+                colocated: false,
+            });
 
-            match op {
-                Operator::Add => builder.ins().f64const(lhs + rhs),
-                Operator::Sub => builder.ins().f64const(lhs - rhs),
-                Operator::Mul => builder.ins().f64const(lhs * rhs),
-                Operator::Div => builder.ins().f64const(lhs / rhs),
-                Operator::LParen => {
-                    unreachable!()
-                }
-            }
+            let num_args = self.expr_defs.get_expr_signature(exprid).params.len();
+            let args = self
+                .value_stack
+                .split_off(self.value_stack.len() - num_args);
+
+            let inst = builder.ins().call(funcref, &args);
+            builder.func.dfg.first_result(inst)
         } else {
-            match op {
-                Operator::Add => builder.ins().fadd(lhs, rhs),
-                Operator::Sub => builder.ins().fsub(lhs, rhs),
-                Operator::Mul => builder.ins().fmul(lhs, rhs),
-                Operator::Div => builder.ins().fdiv(lhs, rhs),
-                Operator::LParen => {
-                    unreachable!()
+            let rhs = self.value_stack.pop().unwrap();
+            let lhs = self.value_stack.pop().unwrap();
+
+            if let (Some((lhs, i1)), Some((rhs, i2))) =
+                (maybe_imm(builder, lhs), maybe_imm(builder, rhs))
+            {
+                builder.func.layout.remove_inst(i1);
+                builder.func.layout.remove_inst(i2);
+
+                match op {
+                    Operator::Add => builder.ins().f64const(lhs + rhs),
+                    Operator::Sub => builder.ins().f64const(lhs - rhs),
+                    Operator::Mul => builder.ins().f64const(lhs * rhs),
+                    Operator::Div => builder.ins().f64const(lhs / rhs),
+                    Operator::Call(_) | Operator::LParen => {
+                        unreachable!()
+                    }
+                }
+            } else {
+                match op {
+                    Operator::Add => builder.ins().fadd(lhs, rhs),
+                    Operator::Sub => builder.ins().fsub(lhs, rhs),
+                    Operator::Mul => builder.ins().fmul(lhs, rhs),
+                    Operator::Div => builder.ins().fdiv(lhs, rhs),
+                    Operator::Call(exprid) => {
+                        let reff = builder
+                            .func
+                            .declare_imported_user_function(UserExternalName {
+                                namespace: 0,
+                                index: exprid.as_bits(),
+                            });
+                        let signature = builder
+                            .import_signature(self.expr_defs.get_expr_signature(exprid).clone());
+
+                        let funcref = builder.import_function(ExtFuncData {
+                            name: ExternalName::User(reff),
+                            signature,
+                            colocated: false,
+                        });
+
+                        let num_args = self.expr_defs.get_expr_signature(exprid).params.len();
+                        let args = self
+                            .value_stack
+                            .split_off(self.value_stack.len() - num_args);
+
+                        let inst = builder.ins().call(funcref, &args);
+                        builder.func.dfg.first_result(inst)
+                    }
+                    Operator::LParen => {
+                        unreachable!()
+                    }
                 }
             }
         };
@@ -150,18 +198,20 @@ impl<'a> Translator<'a> {
                 let val = builder.ins().f64const(val);
                 self.value_stack.push(val);
             }
-            Token::Ident(ident) => {
-                let num_params = self.params.len() as u32;
-                let val = *self.params.entry(ident).or_insert_with(|| {
-                    let base = builder.block_params(builder.current_block().unwrap())[0];
-                    let offset = num_params * types::F64.bytes();
+            Token::Ident(ident) if self.expr_defs.lookup_name(ident).is_some() => {
+                let exprid = self.expr_defs.lookup_name(ident).unwrap();
 
-                    builder.ins().load(
-                        types::F64,
-                        MemFlags::trusted().with_readonly(),
-                        base,
-                        Offset32::new(offset as i32),
-                    )
+                self.op_stack.push(Operator::Call(exprid));
+            }
+            Token::Ident(ident) => {
+                let val = *self.params.entry(ident).or_insert_with(|| {
+                    builder
+                        .func
+                        .signature
+                        .params
+                        .push(AbiParam::new(types::F64));
+
+                    builder.append_block_param(builder.current_block().unwrap(), types::F64)
                 });
 
                 self.value_stack.push(val);
@@ -198,7 +248,11 @@ impl<'a> Translator<'a> {
 
 fn maybe_imm(builder: &mut FunctionBuilder, value: Value) -> Option<(f64, Inst)> {
     let def = builder.func.dfg.value_def(value);
-    let data = builder.func.dfg.insts[def.unwrap_inst()];
+
+    let Some(inst) = def.inst() else {
+        return None;
+    };
+    let data = builder.func.dfg.insts[inst];
 
     if let InstructionData::UnaryIeee64 {
         opcode: Opcode::F64const,
