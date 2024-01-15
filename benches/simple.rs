@@ -2,8 +2,8 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use jitcalc::Compiler;
 
 fn eval_simple(c: &mut Compiler) {
-    let expr = c.compile("a * b * c * d * e");
-    expr.call(&[1.0, 2.0, 3.0, 4.0, 5.0]);
+    let expr = c.compile("a * b * c * d * e").unwrap();
+    expr.eval(&[1.0, 2.0, 3.0, 4.0, 5.0]);
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {

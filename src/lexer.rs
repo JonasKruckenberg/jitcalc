@@ -1,6 +1,6 @@
 use core::str::{CharIndices, FromStr};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Token<'a> {
     Plus,
     Minus,
@@ -10,23 +10,23 @@ pub enum Token<'a> {
     RParen,
     Number(f64),
     Ident(&'a str),
+    Comma,
 }
 
-#[derive(Debug, Clone)]
 pub struct Lexer<'a> {
     raw: &'a str,
     chars: CharIndices<'a>,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(data: &'a str) -> Lexer<'a> {
-        Lexer {
-            raw: data,
-            chars: data.char_indices(),
+    pub fn new(str: &'a str) -> Self {
+        Self {
+            raw: str,
+            chars: str.char_indices(),
         }
     }
 
-    fn eat(&mut self, f: fn(char) -> bool) -> bool {
+    pub fn eat(&mut self, f: fn(char) -> bool) -> bool {
         let mut iter = self.chars.clone();
         match iter.next() {
             Some((_, ch)) if f(ch) => {
@@ -37,24 +37,13 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn eat_char(&mut self, ch: char) -> bool {
-        let mut iter = self.chars.clone();
-        match iter.next() {
-            Some((_, ch2)) if ch == ch2 => {
-                self.chars = iter;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn read_token(&mut self) -> Option<anyhow::Result<Token<'a>>> {
+    fn next_inner(&mut self) -> Option<anyhow::Result<Token<'a>>> {
         let (pos, c) = self.chars.next()?;
 
         let token = match c {
-            '\n' | '\t' | ' ' => {
-                while self.eat_char('\n') || self.eat_char('\t') || self.eat_char(' ') {}
-                return self.read_token();
+            ' ' | '\t' => {
+                while self.eat(|c| c == ' ' || c == '\t') {}
+                return self.next_inner();
             }
             '+' => Token::Plus,
             '-' => Token::Minus,
@@ -62,29 +51,25 @@ impl<'a> Lexer<'a> {
             '/' => Token::Slash,
             '(' => Token::LParen,
             ')' => Token::RParen,
-            c if c.is_digit(10) => {
+            ',' => Token::Comma,
+            c if c.is_numeric() => {
                 let mut end = pos;
-                while self.eat(char::is_numeric) || self.eat_char('.') {
+                while self.eat(|c| c.is_numeric() || c == '.') {
                     end += 1;
                 }
-
                 let str = &self.raw[pos..=end];
                 Token::Number(f64::from_str(str).unwrap())
             }
             c if c.is_alphabetic() => {
-                let mut iter = self.chars.clone();
                 let mut end = pos;
-                while let Some((p, c)) = iter.next() {
-                    if !c.is_alphanumeric() {
-                        break;
-                    }
-                    end = p
+                while self.eat(|c| c.is_alphanumeric()) {
+                    end += 1;
                 }
-                self.chars = iter;
-
-                Token::Ident(&self.raw[pos..=end])
+                let str = &self.raw[pos..=end];
+                Token::Ident(str)
             }
-            c => return Some(Err(anyhow::anyhow!("invalid character: {}", c))),
+
+            c => return Some(Err(anyhow::anyhow!("unexpected character: {}", c))),
         };
 
         Some(Ok(token))
@@ -95,6 +80,6 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = anyhow::Result<Token<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.read_token()
+        self.next_inner()
     }
 }

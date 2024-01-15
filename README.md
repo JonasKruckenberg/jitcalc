@@ -47,6 +47,41 @@ Here are a couple example expressions:
 - `a + b`
 - `(7 + 9) / v1`
 
+## Assignments
+
+You can also assign identifiers to expressions and then use them from within other expressions:
+
+```rust
+use jitcalc::Compiler;
+
+fn main() {
+    let mut jit = Compiler::new_for_host();
+
+    let a = jit.compile("2 + 3").unwrap();
+    jit.assign_expr("a", a);
+
+    let b = jit.compile("a * 6").unwrap();
+    assert_eq!(b.eval(&[]), 30.0);
+}
+```
+
+Expressions that have **no** free variables can be used just like identifiers, while expressions that do require arguments be passed in parentheses:
+
+
+```rust
+use jitcalc::Compiler;
+
+fn main() {
+    let mut jit = Compiler::new_for_host();
+
+    let a = jit.compile("a + 1").unwrap();
+    jit.assign_expr("plus_one", a);
+
+    let b = jit.compile("plus_one(3) * 6").unwrap();
+    assert_eq!(b.eval(&[]), 24.0);
+}
+```
+
 ## Contributing
 
 There are many things not yet implemented, such as functions e.g. `sin`/`tan`/`sqrt` etc.

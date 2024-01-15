@@ -1,49 +1,48 @@
 #![cfg_attr(not(any(feature = "std", test)), no_std)]
 
 extern crate alloc;
+extern crate core;
 
+mod compiled_expr;
 mod jit;
 mod lexer;
 mod mmap;
-mod translator;
+mod parser;
 
-pub use crate::jit::{CompiledExpr, Compiler};
+pub use compiled_expr::CompiledExpr;
+pub use jit::Compiler;
 
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
-    fn simple() {
+    fn lex() {
         let mut jit = Compiler::new_for_host();
 
-        let expr = jit.compile("3 + 7").unwrap();
-        assert_eq!(expr.call(&[]), 10.0);
-
-        let expr = jit.compile("a + b").unwrap();
-        assert_eq!(expr.call(&[1.0, 2.0]), 3.0);
-    }
-
-    #[test]
-    fn parentheses() {
-        let mut jit = Compiler::new_for_host();
-
-        let expr = jit.compile("3 - (7 + 6)").unwrap();
-        assert_eq!(expr.call(&[]), -10.0);
-
-        let expr = jit.compile("a * (b - 6)").unwrap();
-        assert_eq!(expr.call(&[3.0, 8.0]), 6.0);
+        let expr = jit.compile("a + b - (4.2 * 0) / 2").unwrap();
+        assert_eq!(expr.eval(&[1.0, 2.0]), 3.0);
     }
 
     #[test]
     fn reff() {
         let mut jit = Compiler::new_for_host();
 
-        let expr = jit.compile("3 - (7 + 6)").unwrap();
-        assert_eq!(expr.call(&[]), -10.0);
-        jit.define_expr("a", expr).unwrap();
+        let a = jit.compile("2 + 3").unwrap();
+        jit.assign_expr("a", a);
 
-        let expr = jit.compile("a * (b - 6)").unwrap();
-        assert_eq!(expr.call(&[3.0, 8.0]), 6.0);
+        let b = jit.compile("a * 6").unwrap();
+        assert_eq!(b.eval(&[]), 30.0);
+    }
+
+    #[test]
+    fn args() {
+        let mut jit = Compiler::new_for_host();
+
+        let plus_one = jit.compile("a + 1").unwrap();
+        jit.assign_expr("plusone", plus_one);
+
+        let b = jit.compile("plusone(3) * 6").unwrap();
+        assert_eq!(b.eval(&[]), 24.0);
     }
 }

@@ -59,6 +59,7 @@ impl Mmap {
         Mmap { memory, len: size }
     }
 
+    #[cfg(feature = "std")]
     pub unsafe fn slice(&self, range: Range<usize>) -> &[u8] {
         assert!(range.start <= range.end);
         assert!(range.end <= self.len);
