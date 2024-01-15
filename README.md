@@ -103,9 +103,6 @@ JitCalc has builtin supports for a number of functions:
 
 ## Contributing
 
-There are many things not yet implemented, such as functions e.g. `sin`/`tan`/`sqrt` etc.
-I would also love to build a REPL using this and be able to reference expressions.
-
 If you have any ideas for this project: PRs are welcome!
 
 #### License
