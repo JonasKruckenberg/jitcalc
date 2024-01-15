@@ -1,10 +1,10 @@
-use crate::jit::{ExprDefinitions, ExprId};
+use crate::jit::{ExprDefinitions, SymbolId};
 use crate::mmap::Mmap;
+use core::ops::Range;
+use core::ptr::write_unaligned;
 use cranelift_codegen::binemit::Reloc;
 use cranelift_codegen::ir::{ExternalName, Function, Signature};
 use cranelift_codegen::{FinalizedMachReloc, FinalizedRelocTarget};
-use std::ops::Range;
-use std::ptr::write_unaligned;
 
 pub struct CompiledExpr {
     pub(crate) signature: Signature,
@@ -75,7 +75,7 @@ impl CompiledExpr {
                     .as_ptr()
                     .offset(isize::try_from(reloc.offset).unwrap())
             };
-            let base = expr_defs.get_expr_address(ExprId(name.index));
+            let base = expr_defs.lookup_symbol(SymbolId(name.index)).unwrap();
 
             match reloc.kind {
                 Reloc::Abs4 => {

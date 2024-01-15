@@ -82,6 +82,25 @@ fn main() {
 }
 ```
 
+## Builtin Functions
+
+JitCalc has builtin supports for a number of functions:
+
+- `min(x, y)`
+- `max(x, y)`
+- `abs(x)`
+- `ceil(x)`
+- `floor(x)`
+- `sin(x)`
+- `asin(x)`
+- `cos(x)`
+- `acos(x)`
+- `tan(x)`
+- `atan(x)`
+- `log(x, base)`
+- `log2(x)`
+- `log10(x)`
+
 ## Contributing
 
 There are many things not yet implemented, such as functions e.g. `sin`/`tan`/`sqrt` etc.

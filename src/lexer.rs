@@ -62,7 +62,7 @@ impl<'a> Lexer<'a> {
             }
             c if c.is_alphabetic() => {
                 let mut end = pos;
-                while self.eat(|c| c.is_alphanumeric()) {
+                while self.eat(|c| c.is_alphanumeric() || c == '_' || c == '-') {
                     end += 1;
                 }
                 let str = &self.raw[pos..=end];

@@ -1,7 +1,9 @@
 use crate::jit::ExprDefinitions;
 use crate::lexer::{Lexer, Token};
-use std::collections::BTreeMap;
-use std::iter::Peekable;
+use alloc::collections::BTreeMap;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::iter::Peekable;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Opcode {
@@ -9,6 +11,11 @@ pub enum Opcode {
     Sub,
     Mul,
     Div,
+    Abs,
+    Ceil,
+    Floor,
+    Min,
+    Max,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -17,6 +24,10 @@ pub struct Operation(pub(crate) usize);
 #[derive(Debug, Clone)]
 pub enum OperationData {
     Constant(f64),
+    Unary {
+        opcode: Opcode,
+        arg: Operation,
+    },
     Binary {
         opcode: Opcode,
         lhs: Operation,
@@ -63,6 +74,21 @@ impl<'a> Parser<'a> {
                     args: vec![],
                 }
             }
+            OperationData::Unary { opcode, arg } => {
+                self.optimize_tree(expr_defs, arg);
+
+                let arg = &self.operations[arg.0];
+
+                if let OperationData::Constant(arg) = arg {
+                    let val = match opcode {
+                        Opcode::Abs => arg.abs(),
+                        Opcode::Ceil => arg.ceil(),
+                        Opcode::Floor => arg.floor(),
+                        _ => unreachable!("invalid opcode for unary"),
+                    };
+                    self.operations[op.0] = OperationData::Constant(val)
+                }
+            }
             OperationData::Binary { opcode, lhs, rhs } => {
                 self.optimize_tree(expr_defs, lhs);
                 self.optimize_tree(expr_defs, rhs);
@@ -76,8 +102,41 @@ impl<'a> Parser<'a> {
                         Opcode::Sub => lhs - rhs,
                         Opcode::Mul => lhs * rhs,
                         Opcode::Div => lhs / rhs,
+                        Opcode::Min => f64::min(*lhs, *rhs),
+                        Opcode::Max => f64::max(*lhs, *rhs),
+                        _ => unreachable!("invalid opcode for binary"),
                     };
                     self.operations[op.0] = OperationData::Constant(val)
+                }
+            }
+            OperationData::Call { ident, ref args } => {
+                let name = self.strings[ident];
+
+                let opcode = match name {
+                    "abs" => Opcode::Abs,
+                    "ceil" => Opcode::Ceil,
+                    "floor" => Opcode::Floor,
+                    "min" => Opcode::Min,
+                    "max" => Opcode::Max,
+                    _ => return,
+                };
+
+                match opcode {
+                    Opcode::Abs | Opcode::Ceil | Opcode::Floor => {
+                        let arg = args[0];
+                        self.optimize_tree(expr_defs, arg);
+
+                        self.operations[op.0] = OperationData::Unary { opcode, arg };
+                    }
+                    Opcode::Min | Opcode::Max => {
+                        let lhs = args[0];
+                        let rhs = args[1];
+                        self.optimize_tree(expr_defs, lhs);
+                        self.optimize_tree(expr_defs, rhs);
+
+                        self.operations[op.0] = OperationData::Binary { opcode, lhs, rhs };
+                    }
+                    _ => unreachable!(),
                 }
             }
             _ => {}
@@ -195,37 +254,39 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn debug_print(&self, op: Operation) {
-        self.debug_print_inner(op);
-        println!();
-    }
-
-    fn debug_print_inner(&self, op: Operation) {
-        match &self.operations[op.0] {
-            OperationData::Constant(val) => print!("{}", val),
-            OperationData::Variable(ident) => print!("${}", self.strings[*ident]),
-            OperationData::Call { ident, args } => {
-                print!("${}(", self.strings[*ident]);
-                for (i, arg) in args.iter().enumerate() {
-                    if i != 0 {
-                        print!(", ");
-                    }
-                    self.debug_print_inner(*arg);
-                }
-                print!(")");
-            }
-            OperationData::Binary { opcode, lhs, rhs } => {
-                print!("(");
-                self.debug_print_inner(*lhs);
-                match opcode {
-                    Opcode::Add => print!(" + "),
-                    Opcode::Sub => print!(" - "),
-                    Opcode::Mul => print!(" * "),
-                    Opcode::Div => print!(" / "),
-                }
-                self.debug_print_inner(*rhs);
-                print!(")");
-            }
-        }
-    }
+    // #[cfg(feature = "std")]
+    // pub fn debug_print(&self, op: Operation) {
+    //     self.debug_print_inner(op);
+    //     println!();
+    // }
+    //
+    // #[cfg(feature = "std")]
+    // fn debug_print_inner(&self, op: Operation) {
+    //     match &self.operations[op.0] {
+    //         OperationData::Constant(val) => print!("{}", val),
+    //         OperationData::Variable(ident) => print!("${}", self.strings[*ident]),
+    //         OperationData::Call { ident, args } => {
+    //             print!("${}(", self.strings[*ident]);
+    //             for (i, arg) in args.iter().enumerate() {
+    //                 if i != 0 {
+    //                     print!(", ");
+    //                 }
+    //                 self.debug_print_inner(*arg);
+    //             }
+    //             print!(")");
+    //         }
+    //         OperationData::Binary { opcode, lhs, rhs } => {
+    //             print!("(");
+    //             self.debug_print_inner(*lhs);
+    //             match opcode {
+    //                 Opcode::Add => print!(" + "),
+    //                 Opcode::Sub => print!(" - "),
+    //                 Opcode::Mul => print!(" * "),
+    //                 Opcode::Div => print!(" / "),
+    //             }
+    //             self.debug_print_inner(*rhs);
+    //             print!(")");
+    //         }
+    //     }
+    // }
 }

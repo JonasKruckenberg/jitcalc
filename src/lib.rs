@@ -3,6 +3,7 @@
 extern crate alloc;
 extern crate core;
 
+mod builtins;
 mod compiled_expr;
 mod jit;
 mod lexer;
@@ -40,9 +41,23 @@ mod test {
         let mut jit = Compiler::new_for_host();
 
         let plus_one = jit.compile("a + 1").unwrap();
-        jit.assign_expr("plusone", plus_one);
+        jit.assign_expr("plus_one", plus_one);
 
-        let b = jit.compile("plusone(3) * 6").unwrap();
+        let b = jit.compile("plus_one(3) * 6").unwrap();
         assert_eq!(b.eval(&[]), 24.0);
+    }
+
+    #[test]
+    fn builtins() {
+        let mut jit = Compiler::new_for_host();
+
+        let expr = jit.compile("sin(1)").unwrap();
+        assert_eq!(expr.eval(&[]), 0.8414709848078965);
+
+        let expr = jit.compile("cos(1)").unwrap();
+        assert_eq!(expr.eval(&[]), 0.5403023058681398);
+
+        let expr = jit.compile("tan(1)").unwrap();
+        assert_eq!(expr.eval(&[]), 1.557407724654902);
     }
 }
